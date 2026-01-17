@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import { pipeline, env } from '@xenova/transformers';
 import sharp from 'sharp';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 export const runtime = 'nodejs';
-env.allowLocalModels = true;
+env.allowLocalModels = false;
 
+// Load model once
 const classifierPromise = pipeline(
   'image-classification',
   'AdamCodd/vit-base-nsfw-detector'
@@ -21,19 +25,29 @@ export async function POST(req: Request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // Resize and remove alpha
+    // Resize image
     const resized = await sharp(buffer)
       .resize(224, 224)
       .removeAlpha()
       .toFormat('jpeg')
       .toBuffer();
 
+    // Save temp file
+    const tmpPath = path.join(os.tmpdir(), `nsfw-${Date.now()}.jpg`);
+    fs.writeFileSync(tmpPath, resized);
+
     const classifier = await classifierPromise;
 
-    // Pass buffer directly instead of saving to tmp
-    const results = await classifier(resized);
+    // Pass file path (works in Node)
+    const results = await classifier(tmpPath);
 
-    return NextResponse.json({ ok: true, results });
+    // Clean up
+    fs.unlinkSync(tmpPath);
+
+    return NextResponse.json({
+      ok: true,
+      results
+    });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: 'NSFW scan failed' }, { status: 500 });
